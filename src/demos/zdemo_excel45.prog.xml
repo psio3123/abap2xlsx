@@ -3,9 +3,8 @@
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
    <PROGDIR>
-    <NAME>ZDEMO_EXCEL40</NAME>
+    <NAME>ZDEMO_EXCEL45</NAME>
     <SUBC>1</SUBC>
-    <RSTAT>T</RSTAT>
     <RLOAD>E</RLOAD>
     <FIXPT>X</FIXPT>
     <UCCHECK>X</UCCHECK>
@@ -13,15 +12,8 @@
    <TPOOL>
     <item>
      <ID>R</ID>
-     <ENTRY>Print settings</ENTRY>
-     <LENGTH>20</LENGTH>
-    </item>
-    <item>
-     <ID>S</ID>
-     <KEY>S_ICON</KEY>
-     <ENTRY>.</ENTRY>
-     <LENGTH>9</LENGTH>
-     <SPLIT>D</SPLIT>
+     <ENTRY>abap2xlsx Demo: Show Dropdown</ENTRY>
+     <LENGTH>29</LENGTH>
     </item>
    </TPOOL>
   </asx:values>

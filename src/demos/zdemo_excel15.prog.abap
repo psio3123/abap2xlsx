@@ -49,7 +49,7 @@ DATA:
 FIELD-SYMBOLS: <wa_files> TYPE t_demo_excel15.
 
 PARAMETERS: p_path  TYPE zexcel_export_dir,
-            p_noout TYPE xfeld DEFAULT abap_true.
+            p_noout TYPE abap_bool DEFAULT abap_true.
 
 
 AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_path.
@@ -71,6 +71,10 @@ INITIALIZATION.
   <wa_files>-input  = '03_iTab.xlsx'.
   APPEND INITIAL LINE TO lt_files ASSIGNING <wa_files>.
   <wa_files>-input  = '04_Sheets.xlsx'.
+  APPEND INITIAL LINE TO lt_files ASSIGNING <wa_files>.
+  <wa_files>-input = '05_Conditional.xlsx'.
+  APPEND INITIAL LINE TO lt_files ASSIGNING <wa_files>.
+  <wa_files>-input = '07_ConditionalAll.xlsx'.
   APPEND INITIAL LINE TO lt_files ASSIGNING <wa_files>.
   <wa_files>-input  = '08_Range.xlsx'.
   APPEND INITIAL LINE TO lt_files ASSIGNING <wa_files>.
