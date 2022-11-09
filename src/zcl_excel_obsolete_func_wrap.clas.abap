@@ -1,14 +1,14 @@
-class ZCL_EXCEL_OBSOLETE_FUNC_WRAP definition
-  public
-  create public .
+CLASS zcl_excel_obsolete_func_wrap DEFINITION
+  PUBLIC
+  CREATE PUBLIC .
 
-public section.
+  PUBLIC SECTION.
 
-  class-methods GUID_CREATE
-    returning
-      value(RV_GUID_16) type GUID_16 .
-protected section.
-private section.
+    CLASS-METHODS guid_create
+      RETURNING
+        VALUE(rv_guid_16) TYPE zexcel_guid .
+  PROTECTED SECTION.
+  PRIVATE SECTION.
 ENDCLASS.
 
 
@@ -16,12 +16,12 @@ ENDCLASS.
 CLASS ZCL_EXCEL_OBSOLETE_FUNC_WRAP IMPLEMENTATION.
 
 
-METHOD guid_create.
+  METHOD guid_create.
 
-  TRY.
-      rv_guid_16 = cl_system_uuid=>if_system_uuid_static~create_uuid_x16( ).
-    CATCH cx_uuid_error.
-  ENDTRY.
+    TRY.
+        rv_guid_16 = cl_system_uuid=>if_system_uuid_static~create_uuid_x16( ).
+      CATCH cx_uuid_error.
+    ENDTRY.
 
 *--------------------------------------------------------------------*
 * If you are on a release that does not yet have the class cl_system_uuid
@@ -30,9 +30,9 @@ METHOD guid_create.
 * in newer SAP releases
 *--------------------------------------------------------------------*
 *
-*  CALL FUNCTION 'GUID_CREATE'
-*    IMPORTING
-*      ev_guid_16 = rv_guid_16.
+*Before ABAP 7.02:  CALL FUNCTION 'GUID_CREATE'
+*Before ABAP 7.02:    IMPORTING
+*Before ABAP 7.02:      ev_guid_16 = rv_guid_16.
 
-ENDMETHOD.
+  ENDMETHOD.
 ENDCLASS.
