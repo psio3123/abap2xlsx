@@ -42,6 +42,7 @@ CLASS zcl_excel_writer_2007 DEFINITION
     CONSTANTS cl_xl_drawing_for_comments TYPE string VALUE 'xl/drawings/vmlDrawing#.vml'. "#EC NOTEXT
     CONSTANTS c_xl_drawings_vml_rels TYPE string VALUE 'xl/drawings/_rels/vmlDrawing#.vml.rels'. "#EC NOTEXT
     DATA ixml TYPE REF TO if_ixml.
+    DATA control_characters TYPE string.
 
     METHODS create_xl_sheet_sheet_data
       IMPORTING
@@ -144,8 +145,10 @@ CLASS zcl_excel_writer_2007 DEFINITION
     METHODS create_xl_sheet_rels
       IMPORTING
         !io_worksheet     TYPE REF TO zcl_excel_worksheet
-        !iv_drawing_index TYPE i
-        !iv_comment_index TYPE i
+        !iv_drawing_index TYPE i OPTIONAL
+        !iv_comment_index TYPE i OPTIONAL
+        !iv_cmnt_vmlindex TYPE i OPTIONAL
+        !iv_hdft_vmlindex TYPE i OPTIONAL
       RETURNING
         VALUE(ep_content) TYPE xstring .
     METHODS create_xl_styles
@@ -193,6 +196,11 @@ CLASS zcl_excel_writer_2007 DEFINITION
     METHODS create_xl_drawings_vml_rels
       RETURNING
         VALUE(ep_content) TYPE xstring .
+    METHODS escape_string_value
+      IMPORTING
+        !iv_value     TYPE zexcel_cell_value
+      RETURNING
+        VALUE(result) TYPE zexcel_cell_value.
     METHODS set_vml_shape_footer
       IMPORTING
         !is_footer        TYPE zexcel_s_worksheet_head_foot
@@ -261,6 +269,11 @@ CLASS zcl_excel_writer_2007 DEFINITION
         !ip_flag          TYPE flag
       RETURNING
         VALUE(ep_boolean) TYPE tv_charbool  .
+    METHODS number2string
+      IMPORTING
+        !ip_number        TYPE numeric
+      RETURNING
+        VALUE(ep_string) TYPE string.
 ENDCLASS.
 
 
@@ -289,7 +302,21 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
 
 
   METHOD constructor.
+    DATA: lt_unicode_point_codes TYPE TABLE OF string,
+          lv_unicode_point_code  TYPE i.
+
     me->ixml = cl_ixml=>create( ).
+
+    SPLIT '0,1,2,3,4,5,6,7,8,' " U+0000 to U+0008
+       && '11,12,'             " U+000B, U+000C
+       && '14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,' " U+000E to U+001F
+       && '65534,65535'        " U+FFFE, U+FFFF
+      AT ',' INTO TABLE lt_unicode_point_codes.
+    control_characters = ``.
+    LOOP AT lt_unicode_point_codes INTO lv_unicode_point_code.
+      control_characters = control_characters && cl_abap_conv_in_ce=>uccpi( lv_unicode_point_code ).
+    ENDLOOP.
+
   ENDMETHOD.
 
 
@@ -303,10 +330,7 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
           lo_iterator         TYPE REF TO zcl_excel_collection_iterator,
           lo_nested_iterator  TYPE REF TO zcl_excel_collection_iterator,
           lo_table            TYPE REF TO zcl_excel_table,
-          lo_drawing          TYPE REF TO zcl_excel_drawing,
-          lo_drawings         TYPE REF TO zcl_excel_drawings,
-          lo_comment          TYPE REF TO zcl_excel_comment,   " (+) Issue #180
-          lo_comments         TYPE REF TO zcl_excel_comments.  " (+) Issue #180
+          lo_drawing          TYPE REF TO zcl_excel_drawing.
 
     DATA: lv_content                TYPE xstring,
           lv_active                 TYPE flag,
@@ -319,8 +343,13 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
           lv_index_str              TYPE string,
           lv_value                  TYPE string,
           lv_sheet_index            TYPE i,
+          lv_drawing_counter        TYPE i,
+          lv_comment_counter        TYPE i,
+          lv_vml_counter            TYPE i,
           lv_drawing_index          TYPE i,
-          lv_comment_index          TYPE i.        " (+) Issue #180
+          lv_comment_index          TYPE i,        " (+) Issue #180
+          lv_cmnt_vmlindex          TYPE i,
+          lv_hdft_vmlindex          TYPE i.
 
 **********************************************************************
 
@@ -413,37 +442,44 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
 
 * Begin - Add - Issue #180
 * Add comments **********************************
-      lo_comments = lo_worksheet->get_comments( ).
-      IF lo_comments->is_empty( ) = abap_false.
-        lv_comment_index = lv_comment_index + 1.
-
+      IF lo_worksheet->get_comments( )->is_empty( ) = abap_false.
         " Create comment itself
-        lv_content = me->create_xl_comments( lo_worksheet ).
-        lv_xl_comment = me->c_xl_comments.
+        ADD 1 TO lv_comment_counter.
+        lv_comment_index = lv_comment_counter.
         lv_index_str = lv_comment_index.
         CONDENSE lv_index_str NO-GAPS.
+
+        lv_content = me->create_xl_comments( lo_worksheet ).
+        lv_xl_comment = me->c_xl_comments.
         REPLACE ALL OCCURRENCES OF '#' IN lv_xl_comment WITH lv_index_str.
         lo_zip->add( name    = lv_xl_comment
                      content = lv_content ).
 
         " Create vmlDrawing that will host the comment
+        ADD 1 TO lv_vml_counter.
+        lv_cmnt_vmlindex = lv_vml_counter.
+        lv_index_str = lv_cmnt_vmlindex.
+        CONDENSE lv_index_str NO-GAPS.
+
         lv_content = me->create_xl_drawing_for_comments( lo_worksheet ).
         lv_xl_drawing_for_comment = me->cl_xl_drawing_for_comments.
         REPLACE ALL OCCURRENCES OF '#' IN lv_xl_drawing_for_comment WITH lv_index_str.
         lo_zip->add( name    = lv_xl_drawing_for_comment
                      content = lv_content ).
+      ELSE.
+        CLEAR: lv_comment_index, lv_cmnt_vmlindex.
       ENDIF.
 * End   - Add - Issue #180
 
 * Add drawings **********************************
-      lo_drawings = lo_worksheet->get_drawings( ).
-      IF lo_drawings->is_empty( ) = abap_false.
-        lv_drawing_index = lv_drawing_index + 1.
+      IF lo_worksheet->get_drawings( )->is_empty( ) = abap_false.
+        ADD 1 TO lv_drawing_counter.
+        lv_drawing_index = lv_drawing_counter.
+        lv_index_str = lv_drawing_index.
+        CONDENSE lv_index_str NO-GAPS.
 
         lv_content = me->create_xl_drawings( lo_worksheet ).
         lv_xl_drawing = me->c_xl_drawings.
-        lv_index_str = lv_drawing_index.
-        CONDENSE lv_index_str NO-GAPS.
         REPLACE ALL OCCURRENCES OF '#' IN lv_xl_drawing WITH lv_index_str.
         lo_zip->add( name    = lv_xl_drawing
                      content = lv_content ).
@@ -453,15 +489,15 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
         REPLACE ALL OCCURRENCES OF '#' IN lv_xl_drawing_rels WITH lv_index_str.
         lo_zip->add( name    = lv_xl_drawing_rels
                      content = lv_content ).
+      ELSE.
+        CLEAR lv_drawing_index.
       ENDIF.
 
 * Add Header/Footer image
-      DATA: lt_drawings TYPE zexcel_t_drawings.
-      lt_drawings = lo_worksheet->get_header_footer_drawings( ).
-      IF lines( lt_drawings ) > 0. "Header or footer image exist
-
-        lv_comment_index = lv_comment_index + 1.
-        lv_index_str = lv_comment_index.
+      IF lines( lo_worksheet->get_header_footer_drawings( ) ) > 0. "Header or footer image exist
+        ADD 1 TO lv_vml_counter.
+        lv_hdft_vmlindex = lv_vml_counter.
+        lv_index_str = lv_hdft_vmlindex.
         CONDENSE lv_index_str NO-GAPS.
 
         " Create vmlDrawing that will host the image
@@ -477,13 +513,17 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
         REPLACE ALL OCCURRENCES OF '#' IN lv_xl_drawing_rels WITH lv_index_str.
         lo_zip->add( name    = lv_xl_drawing_rels
                      content = lv_content ).
+      ELSE.
+        CLEAR lv_hdft_vmlindex.
       ENDIF.
 
 
       lv_xl_sheet_rels = me->c_xl_sheet_rels.
       lv_content = me->create_xl_sheet_rels( io_worksheet = lo_worksheet
                                              iv_drawing_index = lv_drawing_index
-                                             iv_comment_index = lv_comment_index ).      " (+) Issue #180
+                                             iv_comment_index = lv_comment_index         " (+) Issue #180
+                                             iv_cmnt_vmlindex = lv_cmnt_vmlindex
+                                             iv_hdft_vmlindex = lv_hdft_vmlindex ).
 
       lv_index_str = lv_sheet_index.
       CONDENSE lv_index_str NO-GAPS.
@@ -2646,7 +2686,6 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
   METHOD create_xl_drawings_vml.
 
     DATA:
-      lo_xml_document TYPE REF TO cl_xml_document,
       ld_stream       TYPE string.
 
 
@@ -2656,11 +2695,6 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
 
 * BODY
     ld_stream = set_vml_string( ).
-
-    CREATE OBJECT lo_xml_document.
-    CALL METHOD lo_xml_document->parse_string
-      EXPORTING
-        stream = ld_stream.
 
     CALL FUNCTION 'SCMS_STRING_TO_XSTRING'
       EXPORTING
@@ -3146,6 +3180,15 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
           lv_int_value             TYPE i,
           lv_int_value_string      TYPE string.
     DATA: lv_rel_id            TYPE i.
+    DATA lv_anchor         TYPE string.
+    DATA lv_bottom_row     TYPE i.
+    DATA lv_right_column   TYPE i.
+    DATA lv_bottom_row_str TYPE string.
+    DATA lv_right_column_str  TYPE string.
+    DATA lv_top_row         TYPE i.
+    DATA lv_left_column     TYPE i.
+    DATA lv_top_row_str     TYPE string.
+    DATA lv_left_column_str TYPE string.
 
 
 **********************************************************************
@@ -3268,7 +3311,23 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
       lo_element_clientdata->append_child( new_child = lo_element_sizewithcells ).
       lo_element_anchor = lo_document->create_simple_element( name   = lc_xml_node_anchor
                                                               parent = lo_document ).
-      lo_element_anchor->set_value( '2, 15, 11, 10, 4, 31, 15, 9' ).
+
+      " Anchor represents 4 pairs of numbers:
+      "   ( left column, left offset ), ( top row, top offset ),
+      "   ( right column, right offset ), ( bottom row, botton offset )
+      " Offsets are a number of pixels.
+      " Reference: Anchor Class at
+      "   https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.vml.spreadsheet.anchor?view=openxml-3.0.1
+      lv_anchor = number2string( lo_comment->get_left_column( ) )
+       && `, ` && number2string( lo_comment->get_left_offset( ) )
+       && `, ` && number2string( lo_comment->get_top_row( ) )
+       && `, ` && number2string( lo_comment->get_top_offset( ) )
+       && `, ` && number2string( lo_comment->get_right_column( ) )
+       && `, ` && number2string( lo_comment->get_right_offset( ) )
+       && `, ` && number2string( lo_comment->get_bottom_row( ) )
+       && `, ` && number2string( lo_comment->get_bottom_offset( ) ).
+      lo_element_anchor->set_value( lv_anchor ).
+
       lo_element_clientdata->append_child( new_child = lo_element_anchor ).
       lo_element_autofill = lo_document->create_simple_element( name   = lc_xml_node_autofill
                                                                 parent = lo_document ).
@@ -3314,8 +3373,7 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
       ls_odd_footer   TYPE zexcel_s_worksheet_head_foot,
       ls_even_header  TYPE zexcel_s_worksheet_head_foot,
       ls_even_footer  TYPE zexcel_s_worksheet_head_foot,
-      lv_content      TYPE string,
-      lo_xml_document TYPE REF TO cl_xml_document.
+      lv_content      TYPE string.
 
 
 * INIT_RESULT
@@ -3362,11 +3420,6 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
     CONCATENATE lv_content
                 ld_7
            INTO lv_content.
-
-    CREATE OBJECT lo_xml_document.
-    CALL METHOD lo_xml_document->parse_string
-      EXPORTING
-        stream = lv_content.
 
     CALL FUNCTION 'SCMS_STRING_TO_XSTRING'
       EXPORTING
@@ -3633,7 +3686,8 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
               OR boolc( contains( val = <fs_sheet_string>-string_value end = ` ` ) ) = abap_true.
           lo_sub_element->set_attribute( name = 'space' namespace = 'xml' value = 'preserve' ).
         ENDIF.
-        lo_sub_element->set_value( value = <fs_sheet_string>-string_value ).
+        lv_value = escape_string_value( <fs_sheet_string>-string_value ).
+        lo_sub_element->set_value( value = lv_value ).
       ELSE.
         LOOP AT <fs_sheet_string>-rtf_tab ASSIGNING <fs_rtf>.
           lo_sub_element = lo_document->create_simple_element( name   = lc_xml_node_r
@@ -3645,6 +3699,7 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
             CATCH cx_sy_range_out_of_bounds.
               EXIT.
           ENDTRY.
+          lv_value = escape_string_value( lv_value ).
           IF <fs_rtf>-font IS NOT INITIAL.
             lo_font_element = lo_document->create_simple_element( name   = lc_xml_node_rpr
                                                                   parent = lo_sub_element ).
@@ -3980,8 +4035,7 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
 
     DATA: lv_value         TYPE string,
           lv_relation_id   TYPE i,
-          lv_index_str     TYPE string,
-          lv_comment_index TYPE i.
+          lv_index_str     TYPE string.
 
 **********************************************************************
 * STEP 1: Create [Content_Types].xml into the root of the ZIP
@@ -4025,10 +4079,7 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
     ENDWHILE.
 
 * drawing
-    DATA: lo_drawings TYPE REF TO zcl_excel_drawings.
-
-    lo_drawings = io_worksheet->get_drawings( ).
-    IF lo_drawings->is_empty( ) = abap_false.
+    IF iv_drawing_index > 0.
       lo_element = lo_document->create_simple_element( name   = lc_xml_node_relationship
                                                        parent = lo_document ).
       ADD 1 TO lv_relation_id.
@@ -4052,18 +4103,11 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
     ENDIF.
 
 * Begin - Add - Issue #180
-    DATA: lo_comments  TYPE REF TO zcl_excel_comments.
-
-    lv_comment_index = iv_comment_index.
-
-    lo_comments = io_worksheet->get_comments( ).
-    IF lo_comments->is_empty( ) = abap_false.
+    IF iv_cmnt_vmlindex > 0 AND iv_comment_index > 0.
       " Drawing for comment
       lo_element = lo_document->create_simple_element( name   = lc_xml_node_relationship
                                                        parent = lo_document ).
-
       ADD 1 TO lv_relation_id.
-      ADD 1 TO lv_comment_index.
 
       lv_value = lv_relation_id.
       CONDENSE lv_value.
@@ -4073,7 +4117,7 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
       lo_element->set_attribute_ns( name  = lc_xml_attr_type
                                     value = lc_xml_node_rid_drawing_cmt_tp ).
 
-      lv_index_str = iv_comment_index.
+      lv_index_str = iv_cmnt_vmlindex.
       CONDENSE lv_index_str NO-GAPS.
       lv_value = me->cl_xl_drawing_for_comments.
       REPLACE 'xl' WITH '..' INTO lv_value.
@@ -4108,13 +4152,12 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
 
 **********************************************************************
 * header footer image
-    DATA: lt_drawings TYPE zexcel_t_drawings.
-    lt_drawings = io_worksheet->get_header_footer_drawings( ).
-    IF lines( lt_drawings ) > 0. "Header or footer image exist
-      ADD 1 TO lv_relation_id.
+    IF iv_hdft_vmlindex > 0. "Header or footer image exist
       " Drawing for comment/header/footer
       lo_element = lo_document->create_simple_element( name   = lc_xml_node_relationship
                                                        parent = lo_document ).
+      ADD 1 TO lv_relation_id.
+
       lv_value = lv_relation_id.
       CONDENSE lv_value.
       CONCATENATE 'rId' lv_value INTO lv_value.
@@ -4123,7 +4166,7 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
       lo_element->set_attribute_ns( name  = lc_xml_attr_type
                                     value = lc_xml_node_rid_drawing_cmt_tp ).
 
-      lv_index_str = lv_comment_index.
+      lv_index_str = iv_hdft_vmlindex.
       CONDENSE lv_index_str NO-GAPS.
       lv_value = me->cl_xl_drawing_for_comments.
       REPLACE 'xl' WITH '..' INTO lv_value.
@@ -4190,10 +4233,6 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
     DATA: col_count              TYPE int4,
           lo_autofilters         TYPE REF TO zcl_excel_autofilters,
           lo_autofilter          TYPE REF TO zcl_excel_autofilter,
-          l_autofilter_hidden    TYPE flag,
-          lt_values              TYPE zexcel_t_autofilter_values,
-          ls_values              TYPE zexcel_s_autofilter_values,
-          ls_area                TYPE zexcel_s_autofilter_area,
 
           lo_iterator            TYPE REF TO zcl_excel_collection_iterator,
           lo_table               TYPE REF TO zcl_excel_table,
@@ -4239,9 +4278,8 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
     lo_autofilters = excel->get_autofilters_reference( ).
     lo_autofilter  = lo_autofilters->get( io_worksheet = io_worksheet ) .
     IF lo_autofilter IS BOUND.
-      lt_values           = lo_autofilter->get_values( ) .
-      ls_area             = lo_autofilter->get_filter_area( ) .
-      l_autofilter_hidden = abap_true. " First defautl is not showing
+*     Area not used here, but makes the validation for lo_autofilter->is_row_hidden
+      lo_autofilter->get_filter_area( ) .
     ENDIF.
 *--------------------------------------------------------------------*
 *issue #220 - If cell in tables-area don't use default from row or column or sheet - Coding 1 - start
@@ -4304,14 +4342,6 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
 
     CLEAR ls_sheet_content.
     LOOP AT io_worksheet->sheet_content INTO ls_sheet_content.
-      IF lt_values IS INITIAL. " no values attached to autofilter  " issue #368 autofilter filtering too much
-        CLEAR l_autofilter_hidden.
-      ELSE.
-        READ TABLE lt_values INTO ls_values WITH KEY column = ls_last_row-cell_column.
-        IF sy-subrc = 0 AND ls_values-value = ls_last_row-cell_value.
-          CLEAR l_autofilter_hidden.
-        ENDIF.
-      ENDIF.
       CLEAR ls_style_mapping.
 *Create row element
 *issues #346,#154, #195  - problems when we have information in row_dimension but no cell content in that row
@@ -4342,18 +4372,11 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
         ENDIF.
 
         IF ls_last_row-cell_row NE <ls_sheet_content>-cell_row.
-          IF lo_autofilter IS BOUND.
-            IF ls_area-row_start >=  ls_last_row-cell_row OR " One less for header
-              ls_area-row_end   < ls_last_row-cell_row .
-              CLEAR l_autofilter_hidden.
-            ENDIF.
-          ELSE.
-            CLEAR l_autofilter_hidden.
-          ENDIF.
           IF ls_last_row-cell_row IS NOT INITIAL.
             " Row visibility of previos row.
             IF lo_row->get_visible( io_worksheet ) = abap_false OR
-               l_autofilter_hidden = abap_true.
+               ( lo_autofilter IS BOUND AND
+                 lo_autofilter->is_row_hidden( ls_last_row-cell_row ) = abap_true ).
               lo_element_2->set_attribute_ns( name  = 'hidden' value = 'true' ).
             ENDIF.
             rv_ixml_sheet_data_root->append_child( new_child = lo_element_2 ). " row node
@@ -4400,11 +4423,6 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
             lv_value = lo_row->get_xf_index( ).
             lo_element_2->set_attribute_ns( name  = 's' value = lv_value ).
             lo_element_2->set_attribute_ns( name  = 'customFormat'  value = '1' ).
-          ENDIF.
-          IF lt_values IS INITIAL. " no values attached to autofilter  " issue #368 autofilter filtering too much
-            CLEAR l_autofilter_hidden.
-          ELSE.
-            l_autofilter_hidden = abap_true. " First default is not showing
           ENDIF.
         ELSE.
 
@@ -4518,21 +4536,10 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
       ls_last_row = <ls_sheet_content>.
     ENDLOOP.
     IF sy-subrc = 0.
-      READ TABLE lt_values INTO ls_values WITH KEY column = ls_last_row-cell_column.
-      IF sy-subrc = 0 AND ls_values-value = ls_last_row-cell_value.
-        CLEAR l_autofilter_hidden.
-      ENDIF.
-      IF lo_autofilter IS BOUND.
-        IF ls_area-row_start >=  ls_last_row-cell_row OR " One less for header
-          ls_area-row_end   < ls_last_row-cell_row .
-          CLEAR l_autofilter_hidden.
-        ENDIF.
-      ELSE.
-        CLEAR l_autofilter_hidden.
-      ENDIF.
       " Row visibility of previos row.
       IF lo_row->get_visible( ) = abap_false OR
-         l_autofilter_hidden = abap_true.
+         ( lo_autofilter IS BOUND AND
+           lo_autofilter->is_row_hidden( ls_last_row-cell_row ) = abap_true ).
         lo_element_2->set_attribute_ns( name  = 'hidden' value = 'true' ).
       ENDIF.
       rv_ixml_sheet_data_root->append_child( new_child = lo_element_2 ). " row node
@@ -6111,6 +6118,34 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD escape_string_value.
+
+    DATA: lt_character_positions TYPE TABLE OF i,
+          lv_character_position  TYPE i,
+          lv_escaped_value       TYPE string.
+
+    result = iv_value.
+    IF result CA control_characters.
+
+      CLEAR lt_character_positions.
+      APPEND sy-fdpos TO lt_character_positions.
+      lv_character_position = sy-fdpos + 1.
+      WHILE result+lv_character_position CA control_characters.
+        ADD sy-fdpos TO lv_character_position.
+        APPEND lv_character_position TO lt_character_positions.
+        ADD 1 TO lv_character_position.
+      ENDWHILE.
+      SORT lt_character_positions BY table_line DESCENDING.
+
+      LOOP AT lt_character_positions INTO lv_character_position.
+        lv_escaped_value = |_x{ cl_abap_conv_out_ce=>uccp( substring( val = result off = lv_character_position len = 1 ) ) }_|.
+        REPLACE SECTION OFFSET lv_character_position LENGTH 1 OF result WITH lv_escaped_value.
+      ENDLOOP.
+    ENDIF.
+
+  ENDMETHOD.
+
+
   METHOD flag2bool.
 
 
@@ -6155,6 +6190,12 @@ CLASS zcl_excel_writer_2007 IMPLEMENTATION.
         ep_shareable = abap_true.
       ENDIF.
     ENDIF.
+  ENDMETHOD.
+
+
+  METHOD number2string.
+    ep_string = ip_number.
+    CONDENSE ep_string.
   ENDMETHOD.
 
 
